@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# speech — local voice studio (Ollama Phonon TTS + mlx-whisper STT)
+#   speech                 open the app in the browser
+#   speech "some text"     speak it right now (default voice) without the UI
+#   speech -v Zoey "text"  speak with a given voice
+#   speech voices          list voices
+#   speech stop            stop the background server
+#   speech log             tail the server log
+set -uo pipefail
+APP="$HOME/speech-app"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+PORT="${SPEECH_PORT:-8794}"
+URL="http://127.0.0.1:$PORT"
+LOG="$APP/data/server.log"
+PIDF="$APP/data/server.pid"
+OLLAMA="${OLLAMA_HOST:-http://127.0.0.1:11434}"
+case "$OLLAMA" in http*) ;; *) OLLAMA="http://$OLLAMA";; esac
+DEFAULT_VOICE="${SPEECH_VOICE:-Hadley}"
+PY="$APP/.venv/bin/python"; [ -x "$PY" ] || PY="$(command -v python3)"
+mkdir -p "$APP/data"
+
+c_dim=$'\033[2m'; c_ok=$'\033[38;5;79m'; c_err=$'\033[38;5;210m'; c_0=$'\033[0m'
+up(){ curl -sf -m 1 "$1" >/dev/null 2>&1; }
+
+ensure_ollama(){
+  up "$OLLAMA/api/version" && return 0
+  printf '%sstarting ollama…%s\n' "$c_dim" "$c_0"
+  if [ -d "/Applications/Ollama.app" ]; then open -a Ollama; else nohup ollama serve >/dev/null 2>&1 & fi
+  for _ in $(seq 1 40); do up "$OLLAMA/api/version" && return 0; sleep 0.25; done
+  printf '%sollama did not come up%s\n' "$c_err" "$c_0"; return 1
+}
+ensure_phonon(){
+  curl -s -m 3 "$OLLAMA/api/tags" | grep -q '"phonon' && return 0
+  printf '%spulling phonon (English voices)…%s\n' "$c_dim" "$c_0"; ollama pull phonon
+}
+ensure_server(){
+  up "$URL/api/status" && return 0
+  nohup "$PY" "$APP/server.py" >>"$LOG" 2>&1 &
+  echo $! >"$PIDF"
+  for _ in $(seq 1 40); do up "$URL/api/status" && return 0; sleep 0.15; done
+  printf '%sserver failed to start — see %s%s\n' "$c_err" "$LOG" "$c_0"; tail -n 20 "$LOG"; return 1
+}
+speak_now(){ # $1 voice, $2 text
+  ensure_ollama && ensure_phonon || exit 1
+  local tmp; tmp="$(mktemp -t speech).wav"
+  curl -s "$OLLAMA/v1/audio/speech" -H 'Content-Type: application/json' \
+    -d "$(printf '{"model":"phonon","voice":%s,"input":%s}' "$("$PY" -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$1")" "$("$PY" -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$2")")" \
+    --output "$tmp" && afplay "$tmp"
+  rm -f "$tmp"
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  stop)
+    [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null && rm -f "$PIDF" && echo "stopped" || { pkill -f "$APP/server.py" && echo "stopped" || echo "not running"; } ;;
+  log) tail -n 50 -f "$LOG" ;;
+  voices) ensure_ollama && ollama show phonon | sed -n '/Voices/,/License/p' | sed '1d;$d' | sed 's/^ *//' | grep -v '^$' ;;
+  status) up "$URL/api/status" && curl -s "$URL/api/status" && echo || echo "server not running" ;;
+  -v|--voice) shift; v="${1:-$DEFAULT_VOICE}"; shift; speak_now "$v" "$*" ;;
+  -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' ;;
+  "")
+    ensure_ollama && ensure_phonon && ensure_server || exit 1
+    printf '%sspeech%s  %s\n' "$c_ok" "$c_0" "$URL"
+    open "$URL" ;;
+  *) speak_now "$DEFAULT_VOICE" "$*" ;;
+esac

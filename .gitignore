@@ -1,0 +1,5 @@
+.venv/
+conversations/
+data/
+__pycache__/
+.DS_Store
