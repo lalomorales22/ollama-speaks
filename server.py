@@ -38,6 +38,11 @@ PORT = int(os.environ.get("SPEECH_PORT", "8794"))
 WHISPER_REPO = os.environ.get("SPEECH_WHISPER", "mlx-community/whisper-large-v3-turbo")
 CLAUDES_GUY = "http://127.0.0.1:8080"
 
+sys.path.insert(0, str(APP))
+from orb import Orb, REFLECT_PROMPT, parse_reflection  # noqa: E402
+(APP / "data").mkdir(exist_ok=True)
+ORB = Orb(APP / "data" / "orb.db")
+
 # ---------------------------------------------------------------- whisper
 _whisper = {"mod": None, "state": "checking", "error": ""}
 
@@ -218,6 +223,13 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/voices":
                 model = (q.get("model") or ["phonon"])[0]
                 return self._json({"model": model, "voices": list_voices(model)})
+            if u.path == "/api/orb":
+                ORB.touch_session()
+                return self._json(ORB.state())
+            if u.path == "/api/orb/history":
+                return self._json(ORB.history())
+            if u.path == "/api/orb/persona":
+                return self._json({"persona": ORB.persona()})
             if u.path == "/api/conversations":
                 items = []
                 for p in CONV.glob("*.json"):
@@ -246,6 +258,11 @@ class H(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         u = urlparse(self.path)
+        if u.path.startswith("/api/orb/memories/"):
+            ORB.forget(_safe_id(u.path.rsplit("/", 1)[1]))
+            return self._json({"ok": True})
+        if u.path == "/api/orb/style":
+            return self._json(ORB.reset_style())
         if u.path.startswith("/api/conversations/"):
             cid = _safe_id(u.path.rsplit("/", 1)[1])
             p = CONV / f"{cid}.json"
@@ -256,6 +273,16 @@ class H(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         u = urlparse(self.path)
+        if u.path == "/api/orb/style":
+            try:
+                d = json.loads(self._body().decode() or "{}")
+            except Exception as e:
+                return self._err(f"bad json: {e}", 400)
+            return self._json(ORB.set_style(d))
+        if u.path == "/api/orb/name":
+            d = json.loads(self._body().decode() or "{}")
+            ORB.rename(d.get("name"))
+            return self._json(ORB.state())
         if u.path.startswith("/api/conversations/"):
             cid = _safe_id(u.path.rsplit("/", 1)[1])
             try:
@@ -275,6 +302,20 @@ class H(BaseHTTPRequestHandler):
                 return self._speak()
             if u.path == "/api/chat":
                 return self._chat()
+            if u.path == "/api/orb/turn":
+                d = json.loads(self._body().decode() or "{}")
+                return self._json(ORB.turn(heard=d.get("heard") or "", spoken=d.get("spoken") or "",
+                                           voice=d.get("voice"), mode=d.get("mode") or "chat", conv=d.get("conv")))
+            if u.path == "/api/orb/reflect":
+                return self._reflect()
+            if u.path == "/api/orb/memories":
+                d = json.loads(self._body().decode() or "{}")
+                added = ORB.add_memories([{"kind": d.get("kind") or "fact", "text": d.get("text") or ""}])
+                return self._json({"added": added, "state": ORB.state()})
+            if u.path == "/api/orb/reset":
+                d = json.loads(self._body().decode() or "{}")
+                ORB.reset(keep_memories=bool(d.get("keep_memories")))
+                return self._json(ORB.state())
             if u.path == "/api/transcribe":
                 raw = self._body()
                 if len(raw) < 1000:
@@ -286,6 +327,42 @@ class H(BaseHTTPRequestHandler):
             self._err(f"ollama {e.code}: {e.read().decode(errors='replace')[:400]}", 502)
         except Exception as e:
             self._err(e)
+
+    def _reflect(self):
+        """Ask the chat model what the orb should remember from these messages."""
+        body = json.loads(self._body().decode() or "{}")
+        msgs = body.get("messages") or []
+        model = body.get("model") or "qwen3.5:2b"
+        conv = body.get("conv")
+        if not msgs:
+            return self._err("no messages", 400)
+        existing = "; ".join(m["text"] for m in ORB.state()["memories"][:30]) or "(none)"
+        transcript = "\n".join(f"{'Person' if m.get('role') == 'user' else 'Companion'}: {m.get('content') or m.get('text') or ''}"
+                               for m in msgs[-16:])
+        prompt = REFLECT_PROMPT % (existing, transcript)
+        if model == "claudes-guy":
+            payload = {"model": "default", "messages": [{"role": "user", "content": prompt}], "stream": False}
+            out = ollama_json_url(CLAUDES_GUY + "/v1/chat/completions", payload)
+            raw = (out.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        else:
+            payload = {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False,
+                       "think": False, "format": "json", "options": {"temperature": 0.2}}
+            try:
+                out = ollama_json("/api/chat", payload, timeout=180)
+            except urllib.error.HTTPError as e:
+                msg = e.read().decode(errors="replace")
+                if "think" not in msg:
+                    raise
+                payload.pop("think")
+                out = ollama_json("/api/chat", payload, timeout=180)
+            raw = (out.get("message") or {}).get("content", "")
+        ref = parse_reflection(raw)
+        added = ORB.add_memories(ref["memories"], conv=conv)
+        if ref.get("mood"):
+            ORB.set_mood(str(ref["mood"]))
+        st = ORB.state()
+        st["added"] = added
+        return self._json(st)
 
     def _speak(self):
         body = json.loads(self._body().decode() or "{}")
@@ -354,6 +431,11 @@ class H(BaseHTTPRequestHandler):
                 self.wfile.write(b"%x\r\n" % len(b) + b + b"\r\n")
                 self.wfile.flush()
         self.wfile.write(b"0\r\n\r\n")
+
+
+def ollama_json_url(url, payload, timeout=180):
+    with _open(url, payload) as r:
+        return json.loads(r.read().decode())
 
 
 def _open(url, payload):

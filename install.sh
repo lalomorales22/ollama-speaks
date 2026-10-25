@@ -55,11 +55,11 @@ step "App files → $DEST"
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")"
 if [ -n "$SRC" ] && [ -f "$SRC/server.py" ] && [ -f "$SRC/index.html" ]; then
   mkdir -p "$DEST"
-  if [ "$SRC" != "$DEST" ]; then cp -R "$SRC/server.py" "$SRC/index.html" "$SRC/speech" "$SRC/static" "$DEST/"; fi
+  if [ "$SRC" != "$DEST" ]; then cp -R "$SRC/server.py" "$SRC/orb.py" "$SRC/index.html" "$SRC/speech" "$SRC/static" "$DEST/"; fi
 else
   have git || die "git is required to fetch the app."
   TMP="$(mktemp -d)"; git clone --depth 1 "$REPO" "$TMP/ollama-speaks" >/dev/null 2>&1 || die "clone failed: $REPO"
-  mkdir -p "$DEST"; cp -R "$TMP"/ollama-speaks/{server.py,index.html,speech,static} "$DEST/"; rm -rf "$TMP"
+  mkdir -p "$DEST"; cp -R "$TMP"/ollama-speaks/{server.py,orb.py,index.html,speech,static} "$DEST/"; rm -rf "$TMP"
 fi
 mkdir -p "$DEST/conversations" "$DEST/data"; chmod +x "$DEST/speech"
 note "ok"
