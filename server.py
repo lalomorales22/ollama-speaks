@@ -35,7 +35,25 @@ OLLAMA = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 if not OLLAMA.startswith("http"):
     OLLAMA = "http://" + OLLAMA
 PORT = int(os.environ.get("SPEECH_PORT", "8794"))
-WHISPER_REPO = os.environ.get("SPEECH_WHISPER", "mlx-community/whisper-large-v3-turbo")
+SETTINGS_FILE = APP / "data" / "settings.json"
+def _load_settings():
+    try:
+        return json.loads(SETTINGS_FILE.read_text())
+    except Exception:
+        return {}
+def _save_settings(d):
+    SETTINGS_FILE.parent.mkdir(exist_ok=True)
+    SETTINGS_FILE.write_text(json.dumps(d, indent=1))
+_SETTINGS = _load_settings()
+WHISPER_REPO = _SETTINGS.get("whisper") or os.environ.get("SPEECH_WHISPER", "mlx-community/whisper-large-v3-turbo")
+STT_MODELS = [
+    ("mlx-community/whisper-tiny-mlx", "tiny"),
+    ("mlx-community/whisper-base-mlx", "base"),
+    ("mlx-community/whisper-small-mlx", "small"),
+    ("mlx-community/whisper-medium-mlx", "medium"),
+    ("mlx-community/whisper-large-v3-turbo", "turbo"),
+    ("mlx-community/whisper-large-v3-mlx", "large-v3"),
+]
 CLAUDES_GUY = "http://127.0.0.1:8080"
 
 sys.path.insert(0, str(APP))
@@ -44,25 +62,38 @@ from orb import Orb, REFLECT_PROMPT, parse_reflection  # noqa: E402
 ORB = Orb(APP / "data" / "orb.db")
 
 # ---------------------------------------------------------------- whisper
-_whisper = {"mod": None, "state": "checking", "error": ""}
+_whisper = {"mod": None, "state": "checking", "error": "", "repo": WHISPER_REPO, "pending": None}
+_whisper_lock = threading.Lock()
 
 
-def _load_whisper():
+def _load_whisper(repo=None, switch=False):
+    """Load (download + warm) a whisper model. With switch=True, swap to it on success."""
+    repo = repo or _whisper["repo"]
     try:
         import mlx_whisper  # noqa
         _whisper["mod"] = mlx_whisper
         _whisper["state"] = "warming"
-        # Pull weights now so the first mic press is not a 1.6 GB download.
+        _whisper["pending"] = repo if switch else None
+        _whisper["error"] = ""
         import numpy as np
         silent = np.zeros(16000, dtype=np.float32)
-        mlx_whisper.transcribe(silent, path_or_hf_repo=WHISPER_REPO, fp16=True)
+        with _whisper_lock:
+            mlx_whisper.transcribe(silent, path_or_hf_repo=repo, fp16=True)
+        _whisper["repo"] = repo
         _whisper["state"] = "ready"
+        global WHISPER_REPO
+        WHISPER_REPO = repo
+        if switch:
+            _SETTINGS["whisper"] = repo
+            _save_settings(_SETTINGS)
     except ImportError as e:
         _whisper["state"] = "missing"
         _whisper["error"] = str(e)
     except Exception as e:  # download failure etc.
-        _whisper["state"] = "error"
-        _whisper["error"] = str(e)[:300]
+        _whisper["state"] = "ready" if (switch and _whisper["mod"]) else "error"
+        _whisper["error"] = f"{repo}: {str(e)[:240]}"
+    finally:
+        _whisper["pending"] = None
 
 
 threading.Thread(target=_load_whisper, daemon=True).start()
@@ -88,7 +119,8 @@ def transcribe(raw: bytes, content_type: str) -> str:
              "-ac", "1", "-ar", "16000", "-f", "wav", wav],
             check=True, timeout=60,
         )
-        out = _whisper["mod"].transcribe(wav, path_or_hf_repo=WHISPER_REPO, fp16=True)
+        with _whisper_lock:
+            out = _whisper["mod"].transcribe(wav, path_or_hf_repo=_whisper["repo"], fp16=True)
         return (out.get("text") or "").strip()
     finally:
         for p in (src, wav):
@@ -216,8 +248,12 @@ class H(BaseHTTPRequestHandler):
                     "ollama": ver,
                     "whisper": _whisper["state"],
                     "whisper_error": _whisper["error"],
-                    "whisper_model": WHISPER_REPO,
+                    "whisper_model": _whisper["repo"],
+                    "whisper_pending": _whisper["pending"],
                 })
+            if u.path == "/api/stt/models":
+                return self._json({"models": [{"id": i, "label": l} for i, l in STT_MODELS],
+                                   "current": _whisper["repo"], "state": _whisper["state"], "pending": _whisper["pending"]})
             if u.path == "/api/models":
                 return self._json(list_models())
             if u.path == "/api/voices":
@@ -279,6 +315,18 @@ class H(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._err(f"bad json: {e}", 400)
             return self._json(ORB.set_style(d))
+        if u.path == "/api/stt/model":
+            d = json.loads(self._body().decode() or "{}")
+            repo = d.get("model") or ""
+            if repo not in {i for i, _ in STT_MODELS} and not re.fullmatch(r"[A-Za-z0-9][\w-]*/[A-Za-z0-9][\w.-]*", repo):
+                return self._err("unknown model", 400)
+            if _whisper["state"] == "missing":
+                return self._err("mlx-whisper is not installed", 400)
+            if _whisper["pending"] or _whisper["state"] in ("checking", "warming"):
+                return self._err("whisper is busy loading, try again in a moment", 409)
+            _whisper["pending"] = repo
+            threading.Thread(target=_load_whisper, args=(repo, True), daemon=True).start()
+            return self._json({"ok": True, "pending": repo})
         if u.path == "/api/orb/name":
             d = json.loads(self._body().decode() or "{}")
             ORB.rename(d.get("name"))

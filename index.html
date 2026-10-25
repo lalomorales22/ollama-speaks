@@ -48,6 +48,9 @@ select option{background:#13161f}
 .toggle{display:inline-flex;align-items:center;gap:6px;color:var(--dim);font-size:13px;cursor:pointer;user-select:none;padding:6px 10px;border:1px solid var(--line);border-radius:12px;background:var(--glass2)}
 .toggle input{accent-color:var(--accent);margin:0}
 .icon{width:36px;height:36px;padding:0;display:grid;place-items:center;font-size:16px}
+.sel{display:inline-flex;align-items:center;gap:0;border:1px solid var(--line);border-radius:12px;background:var(--glass2);backdrop-filter:blur(14px);overflow:hidden}
+.sel span{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim2);padding:0 6px 0 10px;font-weight:700}
+.sel select{border:none;border-radius:0;background:transparent;backdrop-filter:none;padding:6px 8px 6px 2px;max-width:140px}
 
 /* level badge + zoom */
 .badge{position:fixed;left:14px;top:62px;z-index:5;display:flex;flex-direction:column;gap:6px;pointer-events:none}
@@ -90,7 +93,8 @@ select option{background:#13161f}
 .composer{width:min(980px,100%);display:flex;gap:10px;align-items:flex-end;background:var(--glass);border:1px solid var(--line);border-radius:22px;padding:10px;backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);box-shadow:0 20px 60px rgba(0,0,0,.5)}
 textarea{flex:1;resize:none;min-height:44px;max-height:180px;background:transparent;border:none;padding:11px 10px;outline:none;font-size:16px}
 textarea::placeholder{color:var(--dim2)}
-.mic{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;font-size:19px;position:relative;flex:none}
+.mic{height:48px;min-width:48px;padding:0 16px 0 14px;border-radius:24px;display:flex;align-items:center;gap:8px;font-size:19px;position:relative;flex:none;font-weight:650}
+.mic .miclbl{font-size:14px}
 .mic.rec{background:var(--cyan);border-color:transparent;color:#001;animation:pulse 1.1s infinite}
 .mic.busy{background:var(--violet);border-color:transparent;color:#001}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(79,216,255,.6)}100%{box-shadow:0 0 0 16px rgba(79,216,255,0)}}
@@ -177,8 +181,9 @@ kbd{font-family:var(--mono);background:rgba(255,255,255,.08);padding:1px 6px;bor
       <button data-mode="speak" title="Type it, pick a voice, hear it">Speak</button>
       <button data-mode="chat" title="Talk back and forth with a local model">Converse</button>
     </div>
-    <select id="chatModel" title="Chat model"></select>
-    <select id="ttsModel" title="Voice model"></select>
+    <label class="sel" id="chatWrap"><span>brain</span><select id="chatModel" title="Chat model"></select></label>
+    <label class="sel"><span>voice</span><select id="ttsModel" title="Voice model (text-to-speech)"></select></label>
+    <label class="sel" id="sttWrap"><span>ears</span><select id="sttModel" title="Speech-to-text model (whisper)"></select></label>
     <label class="toggle" id="hfWrap" title="Listen again automatically after each reply"><input type="checkbox" id="handsfree"> hands-free</label>
     <button class="icon" id="sysBtn" title="System prompt">⚙</button>
     <button class="icon" id="orbBtn" title="Orb properties">◉</button>
@@ -211,7 +216,7 @@ kbd{font-family:var(--mono);background:rgba(255,255,255,.08);padding:1px 6px;bor
     <button id="moreBtn" title="Show all voices">all</button>
   </div>
   <div class="composer">
-    <button class="mic" id="mic" title="Click or hold space to talk">🎙</button>
+    <button class="mic" id="mic" title="Click or hold space to talk, it answers out loud">🎙<span class="miclbl">Talk</span></button>
     <textarea id="input" rows="1" placeholder="Type what you want spoken…"></textarea>
     <button class="send primary" id="send">Speak</button>
   </div>
@@ -286,7 +291,7 @@ const el = {};
  'voiceFilter','previewBtn','moreBtn','chips','log','mic','input','send','hintL','hintR','sys','sysPrompt',
  'capUser','capAI','capText','capWho','state','scrim','convsDrawer','transDrawer','orbDrawer','toast',
  'lvlBadge','lvlNum','orbNameSm','xpBar','moodSm','zoomIn','zoomOut','zoomReset','presets','colors','colorsReset','styleReset','styleRandom',
- 'orbName','stats','optPersona','optReflect','reflectNow','resetKeep','resetAll','mems','memText','memAdd','timeline'].forEach(id=>el[id]=$('#'+id));
+ 'orbName','stats','optPersona','optReflect','reflectNow','resetKeep','resetAll','mems','memText','memAdd','timeline','sttModel','sttWrap','chatWrap'].forEach(id=>el[id]=$('#'+id));
 
 const DEFAULT_SYS = "You are a friendly voice assistant talking out loud with Lalo. Keep replies short and conversational, usually one to three sentences, because they will be spoken aloud. No markdown, no lists, no emojis, no stage directions.";
 const CHAR_VOICES = /Ogre|Elf|Captain|Fairy|Queen|Thing Under|Ancient|Sir |Master |Old |Morwenna|Azgorath|Vyrmathrax|Snow/;
@@ -320,7 +325,7 @@ function rms(an, data){ if(!an) return 0; an.getByteTimeDomainData(data); let s=
 // ============================================================ presets
 const PRESETS = {
   nebula:  {label:'Nebula',  dot:'#6f7fa8', colors:{idle:['#3a4a7a','#6f7fa8'], speaking:['#ff7a1a','#ffd07a'], listening:['#1b6fd8','#7ff0ff'], thinking:['#6a2bd8','#d0a0ff']}, spike:1, smooth:1, speed:1, glow:1, particles:1, rings:1},
-  ember:   {label:'Ember',   dot:'#ff6a2a', colors:{idle:['#4a1a0a','#c04a1a'], speaking:['#ff4a00','#ffd080'], listening:['#ff2a6a','#ffb0c0'], thinking:['#a01040','#ffa0b0']}, spike:1.4, smooth:1.3, speed:1.3, glow:1.5, particles:1.3, rings:0},
+  ember:   {label:'Ember',   dot:'#ff6a2a', colors:{idle:['#7a1a05','#ff7a2a'], speaking:['#ff4a00','#ffd080'], listening:['#ff2a6a','#ffb0c0'], thinking:['#a01040','#ffa0b0']}, spike:1.4, smooth:1.3, speed:1.3, glow:1.5, particles:1.3, rings:0},
   ocean:   {label:'Ocean',   dot:'#2ad0c0', colors:{idle:['#0a2a3a','#1a8aa0'], speaking:['#10c0b0','#b0fff0'], listening:['#1a60ff','#a0e0ff'], thinking:['#2050a0','#80c0ff']}, spike:.6, smooth:.7, speed:.7, glow:.9, particles:.8, rings:2},
   void:    {label:'Void',    dot:'#404050', colors:{idle:['#0a0a12','#30304a'], speaking:['#e0e0ff','#ffffff'], listening:['#303060','#9090ff'], thinking:['#202030','#8060c0']}, spike:.8, smooth:1.6, speed:.5, glow:.4, particles:.5, rings:3, wireframe:true},
   plasma:  {label:'Plasma',  dot:'#ff3af0', colors:{idle:['#30105a','#a030c0'], speaking:['#ff20c0','#ffb0ff'], listening:['#20c0ff','#c0ffff'], thinking:['#8020ff','#e0c0ff']}, spike:2, smooth:1.8, speed:2, glow:1.8, particles:1.8, rings:1},
@@ -412,7 +417,7 @@ const ORB = (() => {
   function resize(){ const w=innerWidth,h=innerHeight; renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); const s=Math.min(1, w/900); root.position.y=0.25*(1-s)+0.42; }
   addEventListener('resize',resize); resize();
   function setState(st){ const c=effectiveColors(style)[st]||effectiveColors(style).idle; targetA.set(c[0]); targetB.set(c[1]); S.orbState=st; }
-  function setStyle(st){ style=Object.assign({}, DEFAULT_STYLE, st); wire.visible=!!style.wireframe; rings.forEach((r,i)=>r.visible=i<(style.rings|0)); setState(S.orbState); applyScale(); }
+  function setStyle(st){ style=Object.assign({}, DEFAULT_STYLE, st); wire.visible=!!style.wireframe; rings.forEach((r,i)=>r.visible=i<(style.rings|0)); setState(S.orbState); uniforms.uColA.value.copy(targetA); uniforms.uColB.value.copy(targetB); glowMat.color.copy(targetB); applyScale(); }
   function setGrowth(gr){ growth=Object.assign(growth, gr); applyScale(); }
   function applyScale(){ targetScale=(style.baseScale||1)*(growth.size||1); }
   function poke(strength=1){ pulse=Math.min(1.5, pulse+strength); burst(120, .6); }
@@ -686,7 +691,7 @@ async function startListening(auto=false){
   if(S.whisper!=='ready') return startWebSpeech();
   try{ stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}}); }
   catch(e){ setHint('Microphone blocked: '+e.message); return; }
-  S.listening=true; el.mic.classList.add('rec'); setHint(auto?'listening (hands-free)…':'listening… click 🎙 again to stop'); setOrb('listening','listening');
+  S.listening=true; el.mic.classList.add('rec'); el.mic.querySelector('.miclbl').textContent='Stop'; setHint(auto?'listening (hands-free)…':'listening… click again to stop'); setOrb('listening','listening');
   const mime=['audio/webm;codecs=opus','audio/webm','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t))||'';
   chunks=[]; rec=new MediaRecorder(stream, mime?{mimeType:mime}:{});
   rec.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
@@ -719,7 +724,7 @@ function stopListening(){
   if(rec&&rec.state!=='inactive'){ rec.stop(); } else if(S.listening&&!webRec){ cleanupMic(); setOrb('idle','ready'); }
 }
 function cleanupMic(){
-  S.listening=false; el.mic.classList.remove('rec'); cancelAnimationFrame(raf);
+  S.listening=false; el.mic.classList.remove('rec'); el.mic.querySelector('.miclbl').textContent='Talk'; cancelAnimationFrame(raf);
   if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
   if(micSrc){ try{micSrc.disconnect();}catch{} micSrc=null; } micAnalyser=null;
 }
@@ -727,11 +732,11 @@ function startWebSpeech(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR){ setHint('no speech recognition available (whisper: '+S.whisper+')'); return; }
   webRec=new SR(); webRec.lang='en-US'; webRec.interimResults=true; webRec.continuous=false;
-  S.listening=true; el.mic.classList.add('rec'); setHint('listening (browser speech)…'); setOrb('listening','listening');
+  S.listening=true; el.mic.classList.add('rec'); el.mic.querySelector('.miclbl').textContent='Stop'; setHint('listening (browser speech)…'); setOrb('listening','listening');
   let finalText='';
   webRec.onresult=e=>{ let s=''; for(const r of e.results){ s+=r[0].transcript; if(r.isFinal) finalText=s; } el.input.value=s; };
   webRec.onerror=e=>setHint('speech error: '+e.error);
-  webRec.onend=()=>{ S.listening=false; el.mic.classList.remove('rec'); webRec=null; const t=(finalText||el.input.value).trim(); if(t){ el.input.value=t; submit(true);} else { setOrb('idle','ready'); if(autoStop) setTimeout(onQueueDrained,400); } };
+  webRec.onend=()=>{ S.listening=false; el.mic.classList.remove('rec'); el.mic.querySelector('.miclbl').textContent='Talk'; webRec=null; const t=(finalText||el.input.value).trim(); if(t){ el.input.value=t; submit(true);} else { setOrb('idle','ready'); if(autoStop) setTimeout(onQueueDrained,400); } };
   webRec.start();
 }
 
@@ -773,7 +778,8 @@ function applySettingsToUI(){
   el.input.placeholder=chat?'Say something… or just talk':'Type what you want spoken…';
   el.hintL.textContent=chat?'enter to send · hold space to talk · esc to stop':'enter to speak · shift+enter for a new line';
   el.chatModel.style.display=chat?'':'none'; el.hfWrap.style.display=chat?'':'none'; el.sysBtn.style.display=chat?'':'none';
-  el.mic.style.display=chat?'':'none';
+  el.sttWrap.style.display=chat?'':'none';
+  el.mic.querySelector('.miclbl').textContent=S.listening?'Stop':'Talk';
 }
 function setBusy(b){ el.send.disabled=b; }
 function setHint(t){ el.hintR.textContent=t||''; }
@@ -798,7 +804,7 @@ el.orbClose.onclick=closeDrawers;
 el.scrim.onclick=closeDrawers;
 el.title.onchange=()=>{ if(S.conv){ S.conv.title=el.title.value.trim(); scheduleSave(); } };
 el.send.onclick=()=>submit(false);
-el.mic.onclick=()=>{ S.listening?stopListening():startListening(false); };
+el.mic.onclick=()=>{ if(S.listening) return stopListening(); if(S.settings.mode!=='chat'){ S.settings.mode='chat'; saveSettings(); applySettingsToUI(); scheduleSave(); toast('Converse mode: talk and it answers in <b>'+esc(S.settings.voice)+'</b>'); } startListening(false); };
 el.input.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); submit(false);} });
 el.input.addEventListener('input',autosize);
 el.exportBtn.onclick=()=>{
@@ -834,7 +840,7 @@ el.memText.addEventListener('keydown',e=>{ if(e.key==='Enter') el.memAdd.onclick
 let spaceDown=false;
 document.addEventListener('keydown',e=>{
   if(e.target.matches('textarea,input')) return;
-  if(e.code==='Space'&&!spaceDown){ e.preventDefault(); spaceDown=true; if(S.settings.mode==='chat') startListening(false); }
+  if(e.code==='Space'&&!spaceDown){ e.preventDefault(); spaceDown=true; if(S.settings.mode!=='chat'){ S.settings.mode='chat'; saveSettings(); applySettingsToUI(); } startListening(false); }
   if(e.key==='Escape'){ audio.stop(); stopListening(); closeDrawers(); setOrb(S.busy?'thinking':'idle', S.busy?'thinking':'ready'); }
   if(e.key==='='||e.key==='+') ORB.zoom(.8); if(e.key==='-') ORB.zoom(1.25); if(e.key==='0') ORB.resetView();
 });
@@ -844,6 +850,7 @@ addEventListener('beforeunload',()=>{ if(S.conv&&S.userTurnsSinceReflect>0&&S.se
 
 // ============================================================ boot
 async function boot(){
+  if(location.hash.includes('converse')) S.settings.mode='chat';
   applySettingsToUI(); newConv(); loadOrb();
   try{
     const [models,status]=await Promise.all([api.get('/api/models'), api.get('/api/status')]);
@@ -857,9 +864,22 @@ async function boot(){
       const poll=setInterval(async()=>{ const s=await api.get('/api/status'); S.whisper=s.whisper; renderFoot(s); if(['ready','missing','error'].includes(s.whisper)) clearInterval(poll); },3000);
     }
   }catch(e){ el.foot.textContent='cannot reach server: '+e.message; }
-  await loadVoices(); await loadConvList(); el.input.focus();
-  if(location.hash.startsWith('#orb')){ toggleDrawer(el.orbDrawer); const t=location.hash.split('-')[1]; const b=t&&el.orbDrawer.querySelector(`.tabs button[data-pane="${t}"]`); if(b) b.click(); }
+  await loadVoices(); await loadConvList(); loadStt(); el.input.focus();
+  if(location.hash.startsWith('#orb')){ el.orbDrawer.style.transition='none'; toggleDrawer(el.orbDrawer); const t=location.hash.split('-')[1]; const b=t&&el.orbDrawer.querySelector(`.tabs button[data-pane="${t}"]`); if(b) b.click(); }
 }
+async function loadStt(){
+  try{ const d=await api.get('/api/stt/models');
+    el.sttModel.innerHTML=d.models.map(m=>`<option value="${m.id}">${m.label}</option>`).join('');
+    if(!d.models.some(m=>m.id===d.current)) el.sttModel.insertAdjacentHTML('beforeend',`<option value="${d.current}">${d.current}</option>`);
+    el.sttModel.value=d.pending||d.current; el.sttModel.disabled=!!d.pending;
+  }catch{}
+}
+el.sttModel.onchange=async()=>{
+  const m=el.sttModel.value; el.sttModel.disabled=true; toast('loading ears: <b>'+esc(m.split('/').pop())+'</b>…', 4000);
+  try{ await api.json('/api/stt/model',{model:m},'PUT'); S.whisper='warming';
+    const poll=setInterval(async()=>{ const s=await api.get('/api/status'); S.whisper=s.whisper; renderFoot(s); if(!s.whisper_pending){ clearInterval(poll); el.sttModel.disabled=false; el.sttModel.value=s.whisper_model; toast(s.whisper_error?'ears failed: '+esc(s.whisper_error):'ears ready: <b>'+esc(s.whisper_model.split('/').pop())+'</b>'); } },1500);
+  }catch(e){ el.sttModel.disabled=false; toast('could not switch: '+esc(e.message)); loadStt(); }
+};
 function renderFoot(s){
   const w={checking:'whisper checking…',warming:'whisper loading…',ready:'whisper ready · local',missing:'whisper missing → browser speech',error:'whisper error → browser speech'}[s.whisper]||s.whisper;
   el.foot.textContent=`ollama ${s.ollama||'offline'} · ${w}`; el.foot.title=s.whisper_error||s.whisper_model||'';

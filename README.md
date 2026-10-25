@@ -9,8 +9,30 @@ while a 3D orb breathes, listens, thinks and talks in front of you. No cloud, no
 ## What it does
 
 - **Speak** mode: type a line, tap a voice button (Hadley, Zoey, Grub the Ogre, The Snow Queen, 38 English voices plus the multilingual set), press Enter. The orb lights up amber and deforms to the audio while it talks.
-- **Converse** mode: talk with any chat model you have in Ollama (or a local OpenAI-compatible server). Replies stream sentence by sentence into Phonon so the voice starts within a second. Tap the mic or hold **space** to talk; turn on **hands-free** and it listens again every time it finishes speaking.
-- **Local speech-to-text** with [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) (large-v3-turbo). Falls back to the browser's speech recognition if whisper is not installed.
+- **Converse** mode: talk with any chat model you have in Ollama (or a local OpenAI-compatible server). Replies stream sentence by sentence into Phonon so the voice starts within a second. Press **Talk** or hold **space** and speak; turn on **hands-free** and it listens again every time it finishes speaking.
+- **Local speech-to-text** with [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper). Pick the ears model in the header (tiny, base, small, medium, large-v3-turbo, large-v3); it swaps at runtime and the choice is remembered. Falls back to the browser's speech recognition if whisper is not installed.
+
+## Talking to it
+
+Three pickers in the header set up the loop: **brain** (the chat model), **voice** (the Phonon text-to-speech model), **ears** (the whisper speech-to-text model).
+
+1. Press **Talk** (or hold space). The orb turns cyan and reacts to your microphone. It stops on its own after about a second of silence, or press again.
+2. Whisper transcribes locally. The orb goes violet while the model thinks.
+3. The reply streams in and is spoken sentence by sentence in the selected voice. The orb turns amber and moves to the waveform.
+4. With **hands-free** on it starts listening again as soon as it finishes speaking, so you can keep going without touching anything. Esc stops everything.
+
+Talk works from Speak mode too; it just switches you into Converse first.
+
+![converse mode](docs/converse.png)
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Ember](docs/preset-ember.png) Ember | ![Ocean](docs/preset-ocean.png) Ocean |
+| ![Plasma](docs/preset-plasma.png) Plasma, wireframe, three rings | ![Matrix](docs/preset-matrix.png) Matrix |
+| ![Look tab](docs/panel-look.png) Look tab | ![Growth tab](docs/panel-growth.png) Growth tab |
+| ![Memory tab](docs/panel-memory.png) Memory tab | |
 - **Conversations save themselves** as JSON in `~/speech-app/conversations/`. Reopen them from the drawer, replay any line, download the WAV, export the transcript as text.
 - `speech "hello there"` from the terminal speaks instantly without opening the UI.
 
@@ -95,8 +117,10 @@ The orb has four states: **idle** (slow blue breathing), **listening** (cyan, re
 ### Server endpoints
 
 ```
-GET  /api/status              ollama version + whisper state
+GET  /api/status              ollama version + whisper state and current model
 GET  /api/models              {tts:[...], chat:[...]}
+GET  /api/stt/models          whisper models you can pick, current, pending
+PUT  /api/stt/model           {model} switch the speech-to-text model at runtime
 GET  /api/voices?model=phonon voices for a TTS model (from `ollama show`)
 POST /api/speak               {model, voice, input} -> audio/wav stream
 POST /api/chat                {model, messages, think} -> NDJSON {delta, done}
