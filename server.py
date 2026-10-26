@@ -451,7 +451,8 @@ class H(BaseHTTPRequestHandler):
         messages = body.get("messages") or []
         if model == "claudes-guy":
             return self._chat_openai(CLAUDES_GUY, messages)
-        payload = {"model": model, "messages": messages, "stream": True}
+        payload = {"model": model, "messages": messages, "stream": True,
+                   "options": {"temperature": 0.8, "repeat_penalty": 1.12, "repeat_last_n": 256}}
         if body.get("think") is False:
             payload["think"] = False
         try:

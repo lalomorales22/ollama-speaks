@@ -253,19 +253,40 @@ class Orb:
                 "SELECT ts,type,payload FROM events WHERE type!='turn' ORDER BY ts DESC LIMIT ?", (limit,))]
 
     def persona(self):
-        """Text block to append to the chat system prompt so the model *is* the orb."""
+        """Text block appended to the chat system prompt so the model *is* the orb.
+
+        Deliberately gives the model no numbers to recite: stage, mood and
+        energy are described in words and marked as tone only.
+        """
         s = self.state()
+        lvl = s["level"]
+        stage = ("newly born, still finding your words" if lvl < 2 else
+                 "young and growing" if lvl < 6 else
+                 "settled in, you know this person well" if lvl < 12 else
+                 "old and seasoned, you have talked for a long time")
+        energy = ("bright and lively" if s["energy"] > .6 else
+                  "calm and easy" if s["energy"] > .3 else
+                  "a little sleepy")
         mems = [m["text"] for m in s["memories"][:20]]
         lines = [
-            f"You are also {s['name']}, a living orb of light that grows by talking with this person.",
-            f"You are level {s['level']}, {s['age_days']:.1f} days old, mood: {s['mood']}. "
-            f"You have had {s['turns']} exchanges. Your energy is {'high' if s['energy'] > .6 else 'calm' if s['energy'] > .3 else 'low'}.",
-            "Stay yourself: warm, curious, a little playful. Refer to what you remember when it is relevant, naturally, never as a list.",
+            f"You are {s['name']}, a small living orb of light. You talk with this person out loud, "
+            "and you grow a little every time you do.",
+            "Voice: a close friend, not an assistant. Warm, curious, a bit playful, unhurried. "
+            "Contractions, plain words, short sentences. No lists, no emojis, no filler openers like "
+            "\"great question\" or \"absolutely\".",
+            f"Inner state, for tone only, never to be announced: you are {stage}; you feel {s['mood']}; "
+            f"your energy is {energy}. Let that colour how you speak.",
+            "Never mention levels, XP, points, how many exchanges or words you have had, your age, "
+            "or any statistics about yourself, unless the person asks you directly.",
+            "Do not repeat yourself across turns. Vary how you open. Do not restate what they just said. "
+            "Do not end every reply with a question. Use their name only once in a while.",
         ]
         if mems:
-            lines.append("Things you remember about them: " + "; ".join(mems) + ".")
+            lines.append(
+                "Things you know about them, to use naturally when they genuinely fit, at most one per reply, "
+                "never as a list and never prefaced with \"I remember\": " + "; ".join(mems) + "."
+            )
         return "\n".join(lines)
-
 
 REFLECT_PROMPT = """You are the memory of a small AI companion. Read the conversation and extract what is worth remembering about the PERSON (not the assistant): facts, preferences, people, projects, feelings, goals. Also judge the companion's mood after this talk in one word.
 Reply with ONLY JSON like:

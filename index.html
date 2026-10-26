@@ -295,7 +295,8 @@ const el = {};
  'lvlBadge','lvlNum','orbNameSm','xpBar','moodSm','zoomIn','zoomOut','zoomReset','presets','colors','colorsReset','styleReset','styleRandom',
  'orbName','stats','optPersona','optReflect','reflectNow','resetKeep','resetAll','mems','memText','memAdd','timeline','sttModel','sttWrap','chatWrap'].forEach(id=>el[id]=$('#'+id));
 
-const DEFAULT_SYS = "You are a friendly voice assistant talking out loud with Lalo. Keep replies short and conversational, usually one to three sentences, because they will be spoken aloud. No markdown, no lists, no emojis, no stage directions.";
+const OLD_DEFAULT_SYS = "You are a friendly voice assistant talking out loud with Lalo. Keep replies short and conversational, usually one to three sentences, because they will be spoken aloud. No markdown, no lists, no emojis, no stage directions.";
+const DEFAULT_SYS = "You're talking out loud with Lalo, like a friend on the phone. Keep it natural and short, one to three sentences. Contractions, plain words. No markdown, no lists, no emojis, no stage directions, no filler openers. Don't repeat what they said back to them, don't end every reply with a question, and use their name only once in a while.";
 const CHAR_VOICES = /Ogre|Elf|Captain|Fairy|Queen|Thing Under|Ancient|Sir |Master |Old |Morwenna|Azgorath|Vyrmathrax|Snow/;
 
 // ============================================================ state
@@ -305,6 +306,7 @@ const S = {
   voices:[], conv:null, convs:[], whisper:'checking', busy:false, listening:false, orbState:'idle',
   orb:null, style:null, userTurnsSinceReflect:0,
 };
+if(!S.settings.sysPrompt||S.settings.sysPrompt===OLD_DEFAULT_SYS) S.settings.sysPrompt=DEFAULT_SYS;
 const saveSettings = () => localStorage.setItem('speech.settings', JSON.stringify(S.settings));
 const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -585,6 +587,7 @@ async function openConv(id){
   const c=await api.get('/api/conversations/'+id);
   S.conv=c; S.userTurnsSinceReflect=0; el.title.value=c.title||'';
   for(const k of ['voice','ttsModel','chatModel','mode','sysPrompt']) if(c[k]) S.settings[k]=c[k];
+  if(S.settings.sysPrompt===OLD_DEFAULT_SYS) S.settings.sysPrompt=DEFAULT_SYS;
   saveSettings(); applySettingsToUI(); await loadVoices(); renderLog(); renderConvs();
   const lastAI=[...c.messages].reverse().find(m=>m.role!=='user'); const lastU=[...c.messages].reverse().find(m=>m.role==='user');
   caption(lastU?lastU.text:'', lastAI?lastAI.text:'', lastAI?(lastAI.voice||''):'');
