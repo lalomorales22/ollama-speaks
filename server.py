@@ -75,10 +75,16 @@ def _load_whisper(repo=None, switch=False):
         _whisper["state"] = "warming"
         _whisper["pending"] = repo if switch else None
         _whisper["error"] = ""
-        import numpy as np
-        silent = np.zeros(16000, dtype=np.float32)
+        # Warm with real speech: a silent clip skips the decode path and the
+        # first real transcription would then stall for ~20 s compiling it.
+        warm = APP / "static" / "warmup.wav"
+        if not warm.is_file():
+            import numpy as np
+            warm = np.zeros(16000, dtype=np.float32)
+        else:
+            warm = str(warm)
         with _whisper_lock:
-            mlx_whisper.transcribe(silent, path_or_hf_repo=repo, fp16=True)
+            mlx_whisper.transcribe(warm, path_or_hf_repo=repo, fp16=True)
         _whisper["repo"] = repo
         _whisper["state"] = "ready"
         global WHISPER_REPO
