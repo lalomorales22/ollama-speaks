@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ollama speaks</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Cdefs%3E%3CradialGradient id=%27g%27 cx=%2740%25%27 cy=%2735%25%27%3E%3Cstop offset=%270%27 stop-color=%27%23ffd07a%27/%3E%3Cstop offset=%271%27 stop-color=%27%23ff7a1a%27/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx=%2732%27 cy=%2732%27 r=%2726%27 fill=%27url(%23g)%27/%3E%3C/svg%3E">
 <style>
 :root{
   --bg:#05060a; --glass:rgba(14,17,26,.62); --glass2:rgba(22,26,38,.75); --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.16);
@@ -95,6 +96,7 @@ textarea{flex:1;resize:none;min-height:44px;max-height:180px;background:transpar
 textarea::placeholder{color:var(--dim2)}
 .mic{height:48px;min-width:48px;padding:0 16px 0 14px;border-radius:24px;display:flex;align-items:center;gap:8px;font-size:19px;position:relative;flex:none;font-weight:650}
 .mic .miclbl{font-size:14px}
+.mic.wait{opacity:.7;animation:none}
 .mic.rec{background:var(--cyan);border-color:transparent;color:#001;animation:pulse 1.1s infinite}
 .mic.busy{background:var(--violet);border-color:transparent;color:#001}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(79,216,255,.6)}100%{box-shadow:0 0 0 16px rgba(79,216,255,0)}}
@@ -537,7 +539,7 @@ const audio = {
     const item=this.q.shift();
     if(!item){ this.playing=false; if(S.orbState==='speaking') setOrb('idle','ready'); onQueueDrained(); return; }
     this.playing=true;
-    let url; try{ url=await item.p; }catch(e){ setHint(''+e.message); return this.next(); }
+    let url; try{ url=await item.p; }catch(e){ console.warn('[speech] tts error', e); toast('voice failed: '+esc(e.message), 5000); setHint(''+e.message); return this.next(); }
     if(!url) return this.next();
     await new Promise(res=>{
       ensureCtx();
@@ -673,7 +675,7 @@ async function submit(viaMic=false){
     }
     if(buf.trim()) speakPart(buf);
     if(!full.trim()){ m.text='(no reply)'; m.el.querySelector('.txt').textContent=m.text; caption(undefined,m.text,''); }
-  }catch(e){ m.text='Error: '+e.message; m.el.querySelector('.txt').textContent=m.text; caption(undefined, m.text, ''); }
+  }catch(e){ console.warn('[speech] chat error', e); m.text='Error: '+e.message; m.el.querySelector('.txt').textContent=m.text; caption(undefined, m.text, ''); toast('chat failed: '+esc(e.message), 6000); }
   m.text=full||m.text; scheduleSave();
   S.busy=false; setBusy(false);
   if(!audio.playing){ setOrb('idle','ready'); onQueueDrained(); }
@@ -685,12 +687,21 @@ function onQueueDrained(){
 
 // ============================================================ microphone
 let rec=null, stream=null, raf=null, heardSpeech=false, chunks=[], webRec=null, autoStop=false, micSrc=null;
+let waitingForEars=false;
 async function startListening(auto=false){
-  if(S.listening||S.busy) return;
+  console.log('[speech] startListening', {auto, listening:S.listening, busy:S.busy, whisper:S.whisper});
+  if(S.listening) return;
+  if(S.busy){ toast('still thinking… wait for the reply, or press Esc'); return; }
+  if(!auto){ if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){ toast('no microphone access in this browser context (open via http://127.0.0.1:8794)'); return; } }
   audio.stop(); autoStop=auto; ensureCtx();
-  if(S.whisper!=='ready') return startWebSpeech();
+  if(S.whisper==='checking'||S.whisper==='warming'){
+    if(!waitingForEars){ waitingForEars=true; toast('ears are still loading, I will listen as soon as they are ready…', 6000); el.mic.classList.add('wait'); el.mic.querySelector('.miclbl').textContent='loading ears…';
+      const poll=setInterval(async()=>{ try{ const st=await api.get('/api/status'); S.whisper=st.whisper; renderFoot(st); }catch{} if(S.whisper==='ready'||S.whisper==='missing'||S.whisper==='error'){ clearInterval(poll); waitingForEars=false; el.mic.classList.remove('wait'); el.mic.querySelector('.miclbl').textContent='Talk'; if(S.whisper==='ready') toast('ears ready'); startListening(auto); } },1000); }
+    return;
+  }
+  if(S.whisper!=='ready'){ toast('local whisper unavailable ('+esc(S.whisper)+'), trying browser speech recognition…', 4000); return startWebSpeech(); }
   try{ stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}}); }
-  catch(e){ setHint('Microphone blocked: '+e.message); return; }
+  catch(e){ console.warn('[speech] mic error', e); toast('microphone blocked: <b>'+esc(e.name||'')+'</b> '+esc(e.message||'')+' — allow the mic for 127.0.0.1 in the address bar', 7000); setHint('microphone blocked'); return; }
   S.listening=true; el.mic.classList.add('rec'); el.mic.querySelector('.miclbl').textContent='Stop'; setHint(auto?'listening (hands-free)…':'listening… click again to stop'); setOrb('listening','listening');
   const mime=['audio/webm;codecs=opus','audio/webm','audio/mp4'].find(t=>MediaRecorder.isTypeSupported(t))||'';
   chunks=[]; rec=new MediaRecorder(stream, mime?{mimeType:mime}:{});
@@ -703,9 +714,10 @@ async function startListening(auto=false){
       const r=await fetch('/api/transcribe',{method:'POST',headers:{'Content-Type':blob.type},body:blob});
       const d=await r.json(); el.mic.classList.remove('busy');
       const text=(d.text||'').trim();
-      if(!text||/^\W*$/.test(text)){ setHint('heard nothing'); setOrb('idle','ready'); if(autoStop) setTimeout(onQueueDrained,400); return; }
+      if(d.error) throw new Error(d.error);
+      if(!text||/^\W*$/.test(text)){ setHint('heard nothing'); toast('heard nothing — speak a little louder or closer'); setOrb('idle','ready'); if(autoStop) setTimeout(onQueueDrained,400); return; }
       el.input.value=text; setHint(''); submit(true);
-    }catch(e){ el.mic.classList.remove('busy'); setHint('transcribe failed: '+e.message); setOrb('idle','ready'); }
+    }catch(e){ console.warn('[speech] transcribe error', e); el.mic.classList.remove('busy'); toast('transcribe failed: '+esc(e.message), 6000); setHint('transcribe failed'); setOrb('idle','ready'); }
   };
   rec.start(250);
   micSrc=actx.createMediaStreamSource(stream); micAnalyser=actx.createAnalyser(); micAnalyser.fftSize=1024; micData=new Uint8Array(1024); micSrc.connect(micAnalyser);
@@ -730,12 +742,12 @@ function cleanupMic(){
 }
 function startWebSpeech(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){ setHint('no speech recognition available (whisper: '+S.whisper+')'); return; }
+  if(!SR){ toast('no speech recognition available (whisper: '+esc(S.whisper)+'). Run install.sh to set up local whisper.', 7000); setHint('no speech recognition'); return; }
   webRec=new SR(); webRec.lang='en-US'; webRec.interimResults=true; webRec.continuous=false;
   S.listening=true; el.mic.classList.add('rec'); el.mic.querySelector('.miclbl').textContent='Stop'; setHint('listening (browser speech)…'); setOrb('listening','listening');
   let finalText='';
   webRec.onresult=e=>{ let s=''; for(const r of e.results){ s+=r[0].transcript; if(r.isFinal) finalText=s; } el.input.value=s; };
-  webRec.onerror=e=>setHint('speech error: '+e.error);
+  webRec.onerror=e=>{ console.warn('[speech] browser speech error', e.error); toast('browser speech recognition failed: <b>'+esc(e.error)+'</b>'+(e.error==='network'?' (Chrome needs internet for this; install whisper for offline)':''), 6000); setHint('speech error: '+e.error); };
   webRec.onend=()=>{ S.listening=false; el.mic.classList.remove('rec'); el.mic.querySelector('.miclbl').textContent='Talk'; webRec=null; const t=(finalText||el.input.value).trim(); if(t){ el.input.value=t; submit(true);} else { setOrb('idle','ready'); if(autoStop) setTimeout(onQueueDrained,400); } };
   webRec.start();
 }
